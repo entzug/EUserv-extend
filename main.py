@@ -73,7 +73,7 @@ def login(username, password) -> (str, requests.session):
               print("验证码可能错，再试一次...")
       else:
           print("验证码识别失败")
-  else:
+    else:
       print("无验证码，直接登录成功")
 
 
