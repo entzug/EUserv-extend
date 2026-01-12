@@ -29,4 +29,6 @@ jobs:
         env:
           USERNAME: ${{ secrets.USERNAME }}
           PASSWORD: ${{ secrets.PASSWORD }}
+          TRUECAPTCHA_USERNAME: ${{ secrets.TRUECAPTCHA_USERNAME}}
+          TRUECAPTCHA_APIKEY: ${{ secrets.TRUECAPTCHA_APIKEY}}
         run: python main.py
