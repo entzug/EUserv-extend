@@ -6,11 +6,39 @@ from bs4 import BeautifulSoup
 
 USERNAME = os.environ["USERNAME"]
 PASSWORD = os.environ["PASSWORD"]
+TRUECAPTCHA_USERNAME = os.environ["TRUECAPTCHA_USERNAME"]
+TRUECAPTCHA_APIKEY   = os.environ["TRUECAPTCHA_APIKEY"]
 PROXIES = {
     "http": "http://127.0.0.1:10809",
     "https": "http://127.0.0.1:10809"
 }
 
+def solve_captcha_with_truecaptcha(captcha_image_content):
+    """发送 base64 图片到 TrueCaptcha API"""
+    base64_img = base64.b64encode(captcha_image_content).decode('utf-8')
+    
+    url = "https://api.apitruecaptcha.org/one/gettext"
+    payload = {
+        "username": TRUECAPTCHA_USERNAME,
+        "apikey": TRUECAPTCHA_APIKEY,
+        "data": base64_img,          # base64 字符串（无 data:image 前缀）
+        "case": "mixed"              # EUserv 验证码通常大小写混合，可试 "upper" 或 "lower"
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        result = response.json()
+        
+        if "result" in result and result.get("status") == "success":
+            captcha_text = result["result"]
+            print(f"TrueCaptcha 识别成功: {captcha_text}")
+            return captcha_text
+        else:
+            print("TrueCaptcha 错误:", result.get("message", "未知错误"))
+            return None
+    except Exception as e:
+        print("TrueCaptcha 请求失败:", str(e))
+        return None
 
 def login(username, password) -> (str, requests.session):
     headers = {
@@ -26,14 +54,26 @@ def login(username, password) -> (str, requests.session):
         "subaction": "login"
     }
     url = "https://support.euserv.com/index.iphp"
-    session = requests.Session()
-    f = session.post(url, headers=headers, data=login_data)
-    f.raise_for_status()
-    if f.text.find('Hello') == -1:
-        return '-1', session
-    # print(f.request.url)
-    sess_id = f.request.url[f.request.url.index('=') + 1:len(f.request.url)]
-    return sess_id, session
+# 先尝试无验证码登录
+resp = session.post(login_url, data=login_data)
+
+if "captcha" in resp.text.lower():  # 检测是否有验证码提示
+    # 提取验证码图片（假设是 img src="/captcha.php?rand=xxx"，需用 BeautifulSoup 或正则提取）
+    # 这里简化：假设你已获取 captcha_img_bytes = session.get(captcha_url).content
+    captcha_solution = solve_captcha_with_truecaptcha(captcha_img_bytes)
+    
+    if captcha_solution:
+        login_data['captcha'] = captcha_solution  # 字段名根据实际 HTML 可能是 'captcha_code' 等
+        resp = session.post(login_url, data=login_data)  # 重新提交
+        # 检查是否成功登录
+        if "dashboard" in resp.url or "success" in resp.text:
+            print("登录成功！")
+        else:
+            print("验证码可能错，再试一次...")
+    else:
+        print("验证码识别失败")
+else:
+    print("无验证码，直接登录成功")
 
 
 def get_servers(sess_id, session) -> {}:
