@@ -54,26 +54,27 @@ def login(username, password) -> (str, requests.session):
         "subaction": "login"
     }
     url = "https://support.euserv.com/index.iphp"
+    session = requests.Session()
 # 先尝试无验证码登录
-resp = session.post(login_url, data=login_data)
+    resp = session.post(login_url, data=login_data)
 
-if "captcha" in resp.text.lower():  # 检测是否有验证码提示
+    if "captcha" in resp.text.lower():  # 检测是否有验证码提示
     # 提取验证码图片（假设是 img src="/captcha.php?rand=xxx"，需用 BeautifulSoup 或正则提取）
     # 这里简化：假设你已获取 captcha_img_bytes = session.get(captcha_url).content
-    captcha_solution = solve_captcha_with_truecaptcha(captcha_img_bytes)
+       captcha_solution = solve_captcha_with_truecaptcha(captcha_img_bytes)
     
-    if captcha_solution:
-        login_data['captcha'] = captcha_solution  # 字段名根据实际 HTML 可能是 'captcha_code' 等
-        resp = session.post(login_url, data=login_data)  # 重新提交
+      if captcha_solution:
+          login_data['captcha'] = captcha_solution  # 字段名根据实际 HTML 可能是 'captcha_code' 等
+          resp = session.post(login_url, data=login_data)  # 重新提交
         # 检查是否成功登录
-        if "dashboard" in resp.url or "success" in resp.text:
-            print("登录成功！")
-        else:
-            print("验证码可能错，再试一次...")
-    else:
-        print("验证码识别失败")
-else:
-    print("无验证码，直接登录成功")
+          if "dashboard" in resp.url or "success" in resp.text:
+              print("登录成功！")
+          else:
+              print("验证码可能错，再试一次...")
+      else:
+          print("验证码识别失败")
+  else:
+      print("无验证码，直接登录成功")
 
 
 def get_servers(sess_id, session) -> {}:
