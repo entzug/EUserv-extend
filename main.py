@@ -2,6 +2,7 @@ import os
 import json
 import time
 import requests
+import base64
 from bs4 import BeautifulSoup
 
 USERNAME = os.environ["USERNAME"]
@@ -40,42 +41,105 @@ def solve_captcha_with_truecaptcha(captcha_image_content):
         print("TrueCaptcha 请求失败:", str(e))
         return None
 
-def login(username, password) -> (str, requests.session):
+import base64  # 别忘了在文件开头导入 base64（你用了但没 import）
+
+def login(username, password):
     headers = {
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                       "Chrome/83.0.4103.116 Safari/537.36",
         "origin": "https://www.euserv.com"
     }
+    
     login_data = {
-        "email": username,
+        "email": username,                  # 注意：EUserv 登录用 "email" 而不是 "username"
         "password": password,
         "form_selected_language": "en",
         "Submit": "Login",
         "subaction": "login"
     }
-    url = "https://support.euserv.com/index.iphp"
-    session = requests.Session()
-# 先尝试无验证码登录
-    resp = session.post(login_url, data=login_data)
-
-    if "captcha" in resp.text.lower():  # 检测是否有验证码提示
-    # 提取验证码图片（假设是 img src="/captcha.php?rand=xxx"，需用 BeautifulSoup 或正则提取）
-    # 这里简化：假设你已获取 captcha_img_bytes = session.get(captcha_url).content
-       captcha_solution = solve_captcha_with_truecaptcha(captcha_img_bytes)
     
-      if captcha_solution:
-          login_data['captcha'] = captcha_solution  # 字段名根据实际 HTML 可能是 'captcha_code' 等
-          resp = session.post(login_url, data=login_data)  # 重新提交
-        # 检查是否成功登录
-          if "dashboard" in resp.url or "success" in resp.text:
-              print("登录成功！")
-          else:
-              print("验证码可能错，再试一次...")
-      else:
-          print("验证码识别失败")
+    url = "https://support.euserv.com/index.iphp"  # 正确的登录 POST 地址
+    
+    session = requests.Session()
+    
+    # 第一次尝试登录（可能无验证码或有）
+    resp = session.post(url, data=login_data, headers=headers)
+    
+    # 检查是否需要验证码（根据历史脚本和常见模式，通常包含 "captcha" 字样或特定 class）
+    if "captcha" in resp.text.lower() or "verify" in resp.text.lower():
+        print("检测到验证码，尝试自动识别...")
+        
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        
+        # 尝试找到验证码图片（常见几种写法，根据 2021-2025 脚本经验）
+        captcha_img_tag = soup.find('img', {'id': 'captcha'}) or \
+                          soup.find('img', {'class': 'captcha'}) or \
+                          soup.find('img', src=lambda s: s and 'captcha' in s)
+        
+        if captcha_img_tag and 'src' in captcha_img_tag.attrs:
+            captcha_src = captcha_img_tag['src']
+            # 补全相对路径
+            if captcha_src.startswith('/'):
+                captcha_url = "https://support.euserv.com" + captcha_src
+            elif not captcha_src.startswith('http'):
+                captcha_url = url.rsplit('/', 1)[0] + '/' + captcha_src
+            else:
+                captcha_url = captcha_src
+            
+            try:
+                img_resp = session.get(captcha_url, headers=headers)
+                img_resp.raise_for_status()
+                captcha_img_bytes = img_resp.content
+                
+                captcha_solution = solve_captcha_with_truecaptcha(captcha_img_bytes)
+                
+                if captcha_solution:
+                    # EUserv 验证码字段名通常是 "captcha" 或 "captcha_code"（根据多个老脚本）
+                    login_data['captcha'] = captcha_solution.strip()  # 去除可能的空格
+                    
+                    # 重新提交登录（带验证码）
+                    resp = session.post(url, data=login_data, headers=headers)
+                    
+                    # 再次检查是否成功（简单判断：看是否跳转或有欢迎词）
+                    if "dashboard" in resp.url or "welcome" in resp.text.lower() or "my services" in resp.text.lower():
+                        print("验证码正确，登录成功！")
+                    else:
+                        print("验证码可能识别错误或登录仍失败，再试一次可能需要重跑脚本")
+                        return None, None  # 失败返回 None
+                else:
+                    print("TrueCaptcha 识别失败")
+                    return None, None
+            except Exception as e:
+                print(f"获取/识别验证码失败: {e}")
+                return None, None
+        else:
+            print("未在响应中找到验证码图片标签")
+            return None, None
     else:
-      print("无验证码，直接登录成功")
-
+        print("无验证码，直接登录成功")
+    
+    # 登录成功后，从 cookie 或页面提取 sess_id（常见方式）
+    # EUserv 通常把 sess_id 放在 URL 参数或 cookie 中
+    # 这里简单从重定向或当前 URL 取（实际可优化）
+    sess_id = None
+    if 'sess_id' in resp.url:
+        sess_id = resp.url.split('sess_id=')[1].split('&')[0]
+    elif 'sess_id' in session.cookies:
+        sess_id = session.cookies.get('sess_id')
+    
+    if not sess_id:
+        # 备选：从页面 HTML 提取（常见 <input type="hidden" name="sess_id" value="xxx">）
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        hidden_sess = soup.find('input', {'name': 'sess_id'})
+        if hidden_sess:
+            sess_id = hidden_sess['value']
+    
+    if sess_id:
+        print(f"获取到 sess_id: {sess_id}")
+        return sess_id, session
+    else:
+        print("登录成功但未能提取 sess_id，请检查")
+        return None, session
 
 def get_servers(sess_id, session) -> {}:
     d = {}
